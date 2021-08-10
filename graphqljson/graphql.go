@@ -34,6 +34,8 @@ import (
 	"io"
 	"reflect"
 	"strings"
+
+	"github.com/mailru/easyjson"
 )
 
 // Reference: https://blog.gopheracademy.com/advent-2017/custom-json-unmarshaler-for-graphql-client/
@@ -44,6 +46,10 @@ import (
 // The implementation is created on top of the JSON tokenizer available
 // in "encoding/json".Decoder.
 func UnmarshalData(data json.RawMessage, v interface{}) error {
+	if o, ok := v.(easyjson.Unmarshaler); ok {
+		return easyjson.Unmarshal([]byte(data), o)
+	}
+
 	d := newDecoder(bytes.NewBuffer(data))
 	if err := d.Decode(v); err != nil {
 		return fmt.Errorf(": %w", err)
