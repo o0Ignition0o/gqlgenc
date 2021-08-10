@@ -14,8 +14,8 @@ type Client struct {
 	Client *client.Client
 }
 
-func NewClient(cli *http.Client, baseURL string, options ...client.HTTPRequestOption) *Client {
-	return &Client{Client: client.NewClient(cli, baseURL, options...)}
+func NewClient(cli *http.Client, baseURL string, options []client.HTTPRequestOption, callbacks []client.HTTPResponseCallback) *Client {
+	return &Client{Client: client.NewClient(cli, baseURL, options, callbacks)}
 }
 
 type Query struct {
