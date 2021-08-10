@@ -19,8 +19,12 @@
 		Client *client.Client
 	}
 
-	func NewClient(cli *http.Client, baseURL string, options []client.HTTPRequestOption, callbacks []client.HTTPResponseCallback) *Client {
-		return &Client{Client: client.NewClient(cli, baseURL, options, callbacks)}
+	func NewClient(
+	    clientPool client.ClientPool,
+	    options []client.HTTPRequestOption,
+	    callbacks []client.HTTPResponseCallback,
+	) *Client {
+		return &Client{Client: client.NewClient(clientPool, options, callbacks)}
 	}
 {{- end }}
 
@@ -42,19 +46,24 @@ type {{ .Query.Name | go }} {{ .Query.Type | ref }}
 	const {{ $model.Name|go }}Document = `{{ $model.Operation }}`
 
 	{{- if $.GenerateClient }}
-		func (c *Client) {{ $model.Name | go }} (ctx context.Context{{- range $arg := .Args }}, {{ $arg.Variable | goPrivate }} {{ $arg.Type | ref }} {{- end }}, httpRequestOptions []client.HTTPRequestOption, httpResponseCallbacks []client.HTTPResponseCallback) (*{{ $model.ResponseStructName | go }}, error) {
+		func (c *Client) {{ $model.Name|go }} (
+	    	ctx context.Context,
+	    	out *{{ $model.ResponseStructName | go }}{{- range $arg := .Args }},
+	    	{{ $arg.Variable | goPrivate }} {{ $arg.Type | ref }} {{- end }},
+	    	httpRequestOptions []client.HTTPRequestOption,
+    		httpResponseCallbacks []client.HTTPResponseCallback,
+		) error {
 			vars := map[string]interface{}{
 			{{- range $args := .VariableDefinitions}}
 				"{{ $args.Variable }}": {{ $args.Variable | goPrivate }},
 			{{- end }}
 			}
 
-			var res {{ $model.ResponseStructName | go }}
-			if err := c.Client.Post(ctx, "{{ $model.Name }}", {{ $model.Name|go }}Document, &res, vars, httpRequestOptions, httpResponseCallbacks); err != nil {
-				return nil, err
-			}
+ 			if err := c.Client.Post(ctx, "{{ $model.Name }}", {{ $model.Name|go }}Document, out, vars, httpRequestOptions, httpResponseCallbacks); err != nil {
+        		return err
+    		}
 
-			return &res, nil
+			return nil
 		}
 	{{- end}}
 {{- end}}

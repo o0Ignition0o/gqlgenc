@@ -130,7 +130,7 @@ func (c *Client) Post(ctx context.Context, operationName, query string, respData
 		httpCl, _ := c.ClientPool.GetClient()
 
 		req, err := c.newRequest(ctx,
-			host, endpoint, "Query",
+			host, endpoint, operationName,
 			query, vars,
 			httpRequestOptions, httpResponseCallbacks,
 		)

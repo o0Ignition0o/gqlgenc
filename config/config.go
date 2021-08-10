@@ -205,6 +205,7 @@ func LoadConfig(filename string) (*Config, error) {
 		Exec:                     config.PackageConfig{Filename: "generated.go"},
 		Directives:               map[string]config.DirectiveConfig{},
 		OmitSliceElementPointers: true,
+		Sources:                  sources,
 	}
 
 	if err := cfg.Client.Check(); err != nil {
@@ -243,7 +244,6 @@ func (c *Config) LoadSchema(ctx context.Context) error {
 	}
 
 	c.GQLConfig.Schema = schema
-
 	return nil
 }
 
