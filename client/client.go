@@ -14,12 +14,14 @@ import (
 
 // HTTPRequestOption represents the options applicable to the http client
 type HTTPRequestOption func(req *http.Request)
+type HTTPResponseCallback func(ctx context.Context, res *http.Response)
 
 // Client is the http client wrapper
 type Client struct {
-	Client             *http.Client
-	BaseURL            string
-	HTTPRequestOptions []HTTPRequestOption
+	Client                *http.Client
+	BaseURL               string
+	HTTPRequestOptions    []HTTPRequestOption
+	HTTPResponseCallbacks []HTTPResponseCallback
 }
 
 // Request represents an outgoing GraphQL request
@@ -30,11 +32,12 @@ type Request struct {
 }
 
 // NewClient creates a new http client wrapper
-func NewClient(client *http.Client, baseURL string, options ...HTTPRequestOption) *Client {
+func NewClient(client *http.Client, baseURL string, options []HTTPRequestOption, callbacks []HTTPResponseCallback) *Client {
 	return &Client{
-		Client:             client,
-		BaseURL:            baseURL,
-		HTTPRequestOptions: options,
+		Client:                client,
+		BaseURL:               baseURL,
+		HTTPRequestOptions:    options,
+		HTTPResponseCallbacks: callbacks,
 	}
 }
 
@@ -104,7 +107,8 @@ func (er *ErrorResponse) Error() string {
 
 // Post sends a http POST request to the graphql endpoint with the given query then unpacks
 // the response into the given object.
-func (c *Client) Post(ctx context.Context, operationName, query string, respData interface{}, vars map[string]interface{}, httpRequestOptions ...HTTPRequestOption) error {
+func (c *Client) Post(ctx context.Context, operationName, query string, respData interface{}, vars map[string]interface{}, httpRequestOptions []HTTPRequestOption,
+	httpResponseCallbacks []HTTPResponseCallback) error {
 	req, err := c.newRequest(ctx, operationName, query, vars, httpRequestOptions)
 	if err != nil {
 		return fmt.Errorf("don't create request: %w", err)
@@ -123,7 +127,16 @@ func (c *Client) Post(ctx context.Context, operationName, query string, respData
 		return fmt.Errorf("failed to read response body: %w", err)
 	}
 
-	return parseResponse(body, resp.StatusCode, respData)
+	parseErr := parseResponse(body, resp.StatusCode, respData)
+
+	for _, httpResponseCallback := range c.HTTPResponseCallbacks {
+		httpResponseCallback(ctx, resp)
+	}
+	for _, callback := range httpResponseCallbacks {
+		callback(ctx, resp)
+	}
+
+	return parseErr
 }
 
 func parseResponse(body []byte, httpCode int, result interface{}) error {
