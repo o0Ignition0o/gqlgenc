@@ -7,19 +7,21 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"net/url"
+
+	"golang.org/x/xerrors"
 
 	"github.com/Yamashou/gqlgenc/graphqljson"
 	"github.com/vektah/gqlparser/v2/gqlerror"
 )
 
 // HTTPRequestOption represents the options applicable to the http client
-type HTTPRequestOption func(req *http.Request)
+type HTTPRequestOption func(ctx context.Context, req *http.Request)
 type HTTPResponseCallback func(ctx context.Context, res *http.Response)
 
 // Client is the http client wrapper
 type Client struct {
-	Client                *http.Client
-	BaseURL               string
+	ClientPool            ClientPool
 	HTTPRequestOptions    []HTTPRequestOption
 	HTTPResponseCallbacks []HTTPResponseCallback
 }
@@ -32,16 +34,26 @@ type Request struct {
 }
 
 // NewClient creates a new http client wrapper
-func NewClient(client *http.Client, baseURL string, options []HTTPRequestOption, callbacks []HTTPResponseCallback) *Client {
+func NewClient(
+	clientPool ClientPool,
+	options []HTTPRequestOption,
+	callbacks []HTTPResponseCallback,
+) *Client {
 	return &Client{
-		Client:                client,
-		BaseURL:               baseURL,
+		ClientPool:            clientPool,
 		HTTPRequestOptions:    options,
 		HTTPResponseCallbacks: callbacks,
 	}
 }
 
-func (c *Client) newRequest(ctx context.Context, operationName, query string, vars map[string]interface{}, httpRequestOptions []HTTPRequestOption) (*http.Request, error) {
+func (c *Client) newRequest(
+	ctx context.Context,
+	host, endpoint string,
+	operationName, query string,
+	vars map[string]interface{},
+	httpRequestOptions []HTTPRequestOption,
+	httpResponseCallbacks []HTTPResponseCallback,
+) (*http.Request, error) {
 	r := &Request{
 		Query:         query,
 		Variables:     vars,
@@ -53,16 +65,18 @@ func (c *Client) newRequest(ctx context.Context, operationName, query string, va
 		return nil, fmt.Errorf("encode: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL, bytes.NewBuffer(requestBody))
+	req, err := http.NewRequestWithContext(
+		ctx, http.MethodPost, endpoint, bytes.NewBuffer(requestBody))
 	if err != nil {
 		return nil, fmt.Errorf("create request struct failed: %w", err)
 	}
+	req.Host = host
 
 	for _, httpRequestOption := range c.HTTPRequestOptions {
-		httpRequestOption(req)
+		httpRequestOption(ctx, req)
 	}
 	for _, httpRequestOption := range httpRequestOptions {
-		httpRequestOption(req)
+		httpRequestOption(ctx, req)
 	}
 
 	return req, nil
@@ -109,34 +123,53 @@ func (er *ErrorResponse) Error() string {
 // the response into the given object.
 func (c *Client) Post(ctx context.Context, operationName, query string, respData interface{}, vars map[string]interface{}, httpRequestOptions []HTTPRequestOption,
 	httpResponseCallbacks []HTTPResponseCallback) error {
-	req, err := c.newRequest(ctx, operationName, query, vars, httpRequestOptions)
-	if err != nil {
-		return fmt.Errorf("don't create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json; charset=utf-8")
-	req.Header.Set("Accept", "application/json; charset=utf-8")
+	host := c.ClientPool.GetHost()
+	endpoint := c.ClientPool.GetEndpoint()
 
-	resp, err := c.Client.Do(req)
-	if err != nil {
-		return fmt.Errorf("request failed: %w", err)
-	}
-	defer resp.Body.Close()
+	for {
+		httpCl, _ := c.ClientPool.GetClient()
 
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("failed to read response body: %w", err)
-	}
+		req, err := c.newRequest(ctx,
+			host, endpoint, "Query",
+			query, vars,
+			httpRequestOptions, httpResponseCallbacks,
+		)
+		if err != nil {
+			return xerrors.Errorf("don't create request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json; charset=utf-8")
+		req.Header.Set("Accept", "application/json; charset=utf-8")
 
-	parseErr := parseResponse(body, resp.StatusCode, respData)
+		res, err := httpCl.Do(req)
+		if err != nil {
+			if innerErr, ok := err.(*url.Error); ok {
+				if !(innerErr.Err == context.DeadlineExceeded ||
+					innerErr.Err == context.Canceled) {
+					c.ClientPool.Refresh(fmt.Sprintf("%#v (%#v)", err, innerErr.Err))
+					continue
+				}
+			}
+			return xerrors.Errorf("request failed: %w", err)
+		}
+		body, err := ioutil.ReadAll(res.Body)
+		res.Body.Close()
+		if err != nil {
+			return fmt.Errorf("failed to read response body: %w", err)
+		}
 
-	for _, httpResponseCallback := range c.HTTPResponseCallbacks {
-		httpResponseCallback(ctx, resp)
-	}
-	for _, callback := range httpResponseCallbacks {
-		callback(ctx, resp)
-	}
+		if err := parseResponse(body, res.StatusCode, respData); err != nil {
+			return fmt.Errorf("unable to parse response: %w", err)
+		}
 
-	return parseErr
+		for _, httpResponseCallback := range c.HTTPResponseCallbacks {
+			httpResponseCallback(ctx, res)
+		}
+		for _, callback := range httpResponseCallbacks {
+			callback(ctx, res)
+		}
+
+		return nil
+	}
 }
 
 func parseResponse(body []byte, httpCode int, result interface{}) error {

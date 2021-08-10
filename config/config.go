@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -16,6 +17,7 @@ import (
 	"github.com/vektah/gqlparser/v2"
 	"github.com/vektah/gqlparser/v2/ast"
 	"github.com/vektah/gqlparser/v2/validator"
+	"golang.org/x/xerrors"
 	"gopkg.in/yaml.v2"
 )
 
@@ -200,9 +202,9 @@ func LoadConfig(filename string) (*Config, error) {
 		Model:  cfg.Model,
 		Models: models,
 		// TODO: gqlgen must be set exec but client not used
-		Exec:       config.PackageConfig{Filename: "generated.go"},
-		Directives: map[string]config.DirectiveConfig{},
-		Sources:    sources,
+		Exec:                     config.PackageConfig{Filename: "generated.go"},
+		Directives:               map[string]config.DirectiveConfig{},
+		OmitSliceElementPointers: true,
 	}
 
 	if err := cfg.Client.Check(); err != nil {
@@ -246,16 +248,29 @@ func (c *Config) LoadSchema(ctx context.Context) error {
 }
 
 func (c *Config) loadRemoteSchema(ctx context.Context) (*ast.Schema, error) {
-	addHeader := func(req *http.Request) {
+	addHeader := func(_ context.Context, req *http.Request) {
 		for key, value := range c.Endpoint.Headers {
 			req.Header.Set(key, value)
 		}
 	}
-	gqlclient := client.NewClient(http.DefaultClient, c.Endpoint.URL, []client.HTTPRequestOption{addHeader}, nil)
+	endpoint, err := url.Parse(c.Endpoint.URL)
+	if err != nil {
+		return nil, xerrors.Errorf("load remote schema failed: %w", err)
+	}
+	httpCl, err := client.NewDefaultClientPool(endpoint)
+	if err != nil {
+		return nil, xerrors.Errorf("load remote schema failed: %w", err)
+	}
+	gqlclient := client.NewClient(
+		httpCl,
+		[]client.HTTPRequestOption{addHeader},
+		nil,
+	)
 
 	var res introspection.Query
+
 	if err := gqlclient.Post(ctx, "Query", introspection.Introspection, &res, nil, nil, nil); err != nil {
-		return nil, fmt.Errorf("introspection query failed: %w", err)
+		return nil, xerrors.Errorf("introspection query failed: %w", err)
 	}
 
 	schema, err := validator.ValidateSchemaDocument(introspection.ParseIntrospectionQuery(c.Endpoint.URL, res))
