@@ -3,6 +3,7 @@ package client
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -19,6 +20,15 @@ import (
 type HTTPRequestOption func(ctx context.Context, req *http.Request)
 type HTTPResponseCallback func(ctx context.Context, res *http.Response)
 
+type PersistedQuery struct {
+	Version    int      `json:"version"`
+	Sha256Hash [32]byte `json:"sha256Hash"`
+}
+
+type Extensions struct {
+	PersistedQuery PersistedQuery `json:"persistedQuery, omitempty"`
+}
+
 // Client is the http client wrapper
 type Client struct {
 	ClientPool            ClientPool
@@ -28,9 +38,10 @@ type Client struct {
 
 // Request represents an outgoing GraphQL request
 type Request struct {
-	Query         string                 `json:"query"`
+	Query         string                 `json:"query,omitempty"`
 	Variables     map[string]interface{} `json:"variables,omitempty"`
 	OperationName string                 `json:"operationName,omitempty"`
+	Extensions    Extensions             `json:"extensions,omitempty"`
 }
 
 // NewClient creates a new http client wrapper
@@ -46,10 +57,53 @@ func NewClient(
 	}
 }
 
+func (c *Client) newPersistedRequest(
+	ctx context.Context,
+	host, endpoint string,
+	operationName string,
+	queryHash [32]byte,
+	vars map[string]interface{},
+	httpRequestOptions []HTTPRequestOption,
+	httpResponseCallbacks []HTTPResponseCallback,
+) (*http.Request, error) {
+	r := &Request{
+		Extensions: Extensions{
+			PersistedQuery: PersistedQuery{
+				Version:    1,
+				Sha256Hash: queryHash,
+			},
+		},
+		Variables:     vars,
+		OperationName: operationName,
+	}
+
+	requestBody, err := json.Marshal(r)
+	if err != nil {
+		return nil, fmt.Errorf("encode: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(
+		ctx, http.MethodPost, endpoint, bytes.NewBuffer(requestBody))
+	if err != nil {
+		return nil, fmt.Errorf("create request struct failed: %w", err)
+	}
+	req.Host = host
+
+	for _, httpRequestOption := range c.HTTPRequestOptions {
+		httpRequestOption(ctx, req)
+	}
+	for _, httpRequestOption := range httpRequestOptions {
+		httpRequestOption(ctx, req)
+	}
+
+	return req, nil
+}
+
 func (c *Client) newRequest(
 	ctx context.Context,
 	host, endpoint string,
 	operationName, query string,
+	queryHash [32]byte,
 	vars map[string]interface{},
 	httpRequestOptions []HTTPRequestOption,
 	httpResponseCallbacks []HTTPResponseCallback,
@@ -58,6 +112,12 @@ func (c *Client) newRequest(
 		Query:         query,
 		Variables:     vars,
 		OperationName: operationName,
+		Extensions: Extensions{
+			PersistedQuery: PersistedQuery{
+				Version:    1,
+				Sha256Hash: queryHash,
+			},
+		},
 	}
 
 	requestBody, err := json.Marshal(r)
@@ -126,21 +186,48 @@ func (c *Client) Post(ctx context.Context, operationName, query string, respData
 	host := c.ClientPool.GetHost()
 	endpoint := c.ClientPool.GetEndpoint()
 
+	// todo[igni]: grab the hash somewhere
+	sha256Hash := sha256.Sum256([]byte(query))
+
 	for {
 		httpCl, _ := c.ClientPool.GetClient()
 
-		req, err := c.newRequest(ctx,
+		apqReq, err := c.newPersistedRequest(ctx,
 			host, endpoint, operationName,
-			query, vars,
+			sha256Hash, vars,
 			httpRequestOptions, httpResponseCallbacks,
 		)
 		if err != nil {
 			return xerrors.Errorf("don't create request: %w", err)
 		}
-		req.Header.Set("Content-Type", "application/json; charset=utf-8")
-		req.Header.Set("Accept", "application/json; charset=utf-8")
+		apqReq.Header.Set("Content-Type", "application/json; charset=utf-8")
+		apqReq.Header.Set("Accept", "application/json; charset=utf-8")
 
-		res, err := httpCl.Do(req)
+		res, err := httpCl.Do(apqReq)
+		if err != nil {
+			if innerErr, ok := err.(*url.Error); ok {
+				if !(innerErr.Err == context.DeadlineExceeded ||
+					innerErr.Err == context.Canceled) {
+					c.ClientPool.Refresh(fmt.Sprintf("%#v (%#v)", err, innerErr.Err))
+					continue
+				}
+			}
+			// Perform a regular request if the APQ one failed
+			// return xerrors.Errorf("request failed: %w", err)
+			req, err := c.newRequest(ctx,
+				host, endpoint, operationName,
+				query, sha256Hash, vars,
+				httpRequestOptions, httpResponseCallbacks,
+			)
+			if err != nil {
+				return xerrors.Errorf("don't create request: %w", err)
+			}
+			req.Header.Set("Content-Type", "application/json; charset=utf-8")
+			req.Header.Set("Accept", "application/json; charset=utf-8")
+
+			res, err = httpCl.Do(req)
+		}
+
 		if err != nil {
 			if innerErr, ok := err.(*url.Error); ok {
 				if !(innerErr.Err == context.DeadlineExceeded ||
