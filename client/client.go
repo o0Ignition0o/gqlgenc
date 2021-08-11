@@ -213,7 +213,6 @@ func (c *Client) Post(ctx context.Context, operationName, query string, respData
 				}
 			}
 			// Perform a regular request if the APQ one failed
-			// return xerrors.Errorf("request failed: %w", err)
 			req, err := c.newRequest(ctx,
 				host, endpoint, operationName,
 				query, sha256Hash, vars,
