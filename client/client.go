@@ -20,8 +20,8 @@ type HTTPRequestOption func(ctx context.Context, req *http.Request)
 type HTTPResponseCallback func(ctx context.Context, res *http.Response)
 
 type PersistedQuery struct {
-	Version    int      `json:"version"`
-	Sha256Hash [32]byte `json:"sha256Hash"`
+	Version    int    `json:"version"`
+	Sha256Hash string `json:"sha256Hash"`
 }
 
 type Extensions struct {
@@ -60,7 +60,7 @@ func (c *Client) newPersistedRequest(
 	ctx context.Context,
 	host, endpoint string,
 	operationName string,
-	queryHash [32]byte,
+	queryHash string,
 	vars map[string]interface{},
 	httpRequestOptions []HTTPRequestOption,
 	httpResponseCallbacks []HTTPResponseCallback,
@@ -102,7 +102,7 @@ func (c *Client) newRequest(
 	ctx context.Context,
 	host, endpoint string,
 	operationName, query string,
-	queryHash [32]byte,
+	queryHash string,
 	vars map[string]interface{},
 	httpRequestOptions []HTTPRequestOption,
 	httpResponseCallbacks []HTTPResponseCallback,
@@ -180,7 +180,7 @@ func (er *ErrorResponse) Error() string {
 
 // Post sends a http POST request to the graphql endpoint with the given query then unpacks
 // the response into the given object.
-func (c *Client) Post(ctx context.Context, operationName, query string, queryHash [32]byte, respData interface{}, vars map[string]interface{}, httpRequestOptions []HTTPRequestOption,
+func (c *Client) Post(ctx context.Context, operationName, query string, queryHash string, respData interface{}, vars map[string]interface{}, httpRequestOptions []HTTPRequestOption,
 	httpResponseCallbacks []HTTPResponseCallback) error {
 	host := c.ClientPool.GetHost()
 	endpoint := c.ClientPool.GetEndpoint()

@@ -270,7 +270,7 @@ func (c *Config) loadRemoteSchema(ctx context.Context) (*ast.Schema, error) {
 
 	var res introspection.Query
 
-	if err := gqlclient.Post(ctx, "Query", introspection.Introspection, sha256.Sum256([]byte(introspection.Introspection)), &res, nil, nil, nil); err != nil {
+	if err := gqlclient.Post(ctx, "Query", introspection.Introspection, fmt.Sprintf("%x", sha256.Sum256([]byte(introspection.Introspection))), &res, nil, nil, nil); err != nil {
 		return nil, xerrors.Errorf("introspection query failed: %w", err)
 	}
 

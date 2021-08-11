@@ -138,15 +138,8 @@ func queryString(queryDocument *ast.QueryDocument) string {
 }
 
 func hashString(queryString string) string {
-	asBytes := sha256.Sum256([]byte("hello world\n"))
-
-	var bytesString bytes.Buffer
-
-	for _, b := range asBytes {
-		bytesString.WriteString(fmt.Sprintf("%d,", b))
-	}
-
-	return fmt.Sprintf("[]bytes{ %s }", bytesString.String())
+	asBytes := sha256.Sum256([]byte(queryString))
+	return fmt.Sprintf("%x", asBytes)
 }
 
 type OperationResponse struct {
