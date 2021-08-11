@@ -3,7 +3,6 @@ package client
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -181,20 +180,17 @@ func (er *ErrorResponse) Error() string {
 
 // Post sends a http POST request to the graphql endpoint with the given query then unpacks
 // the response into the given object.
-func (c *Client) Post(ctx context.Context, operationName, query string, respData interface{}, vars map[string]interface{}, httpRequestOptions []HTTPRequestOption,
+func (c *Client) Post(ctx context.Context, operationName, query string, queryHash [32]byte, respData interface{}, vars map[string]interface{}, httpRequestOptions []HTTPRequestOption,
 	httpResponseCallbacks []HTTPResponseCallback) error {
 	host := c.ClientPool.GetHost()
 	endpoint := c.ClientPool.GetEndpoint()
-
-	// todo[igni]: grab the hash somewhere
-	sha256Hash := sha256.Sum256([]byte(query))
 
 	for {
 		httpCl, _ := c.ClientPool.GetClient()
 
 		apqReq, err := c.newPersistedRequest(ctx,
 			host, endpoint, operationName,
-			sha256Hash, vars,
+			queryHash, vars,
 			httpRequestOptions, httpResponseCallbacks,
 		)
 		if err != nil {
@@ -215,7 +211,7 @@ func (c *Client) Post(ctx context.Context, operationName, query string, respData
 			// Perform a regular request if the APQ one failed
 			req, err := c.newRequest(ctx,
 				host, endpoint, operationName,
-				query, sha256Hash, vars,
+				query, queryHash, vars,
 				httpRequestOptions, httpResponseCallbacks,
 			)
 			if err != nil {

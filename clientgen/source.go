@@ -2,6 +2,7 @@ package clientgen
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"fmt"
 	"go/types"
 
@@ -63,15 +64,19 @@ type Operation struct {
 	Name                string
 	ResponseStructName  string
 	Operation           string
+	Hash                string
 	Args                []*Argument
 	VariableDefinitions ast.VariableDefinitionList
 }
 
 func NewOperation(operation *ast.OperationDefinition, queryDocument *ast.QueryDocument, args []*Argument, generateConfig *config.GenerateConfig) *Operation {
+	queryString := queryString(queryDocument)
+	hash := hashString(queryString)
 	return &Operation{
 		Name:                operation.Name,
 		ResponseStructName:  getResponseStructName(operation, generateConfig),
-		Operation:           queryString(queryDocument),
+		Operation:           queryString,
+		Hash:                hash,
 		Args:                args,
 		VariableDefinitions: operation.VariableDefinitions,
 	}
@@ -130,6 +135,18 @@ func queryString(queryDocument *ast.QueryDocument) string {
 	astFormatter.FormatQueryDocument(queryDocument)
 
 	return buf.String()
+}
+
+func hashString(queryString string) string {
+	asBytes := sha256.Sum256([]byte("hello world\n"))
+
+	var bytesString bytes.Buffer
+
+	for _, b := range asBytes {
+		bytesString.WriteString(fmt.Sprintf("%d,", b))
+	}
+
+	return fmt.Sprintf("[]bytes{ %s }", bytesString.String())
 }
 
 type OperationResponse struct {
