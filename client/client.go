@@ -25,7 +25,7 @@ type PersistedQuery struct {
 }
 
 type Extensions struct {
-	PersistedQuery PersistedQuery `json:"persistedQuery, omitempty"`
+	PersistedQuery PersistedQuery `json:"persistedQuery,omitempty"`
 }
 
 // Client is the http client wrapper
