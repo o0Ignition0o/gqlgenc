@@ -1,9 +1,11 @@
 package client
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -23,6 +25,42 @@ const (
 
 type fakeRes struct {
 	Something string `json:"something"`
+}
+
+func TestMakeRequest(t *testing.T) {
+	ctx := context.TODO()
+	host := "testHost"
+	endpoint := "testEndpoint"
+	operationName := "testOperation"
+	queryHash := "testQueryHash"
+	query := "{test: TestQuery}"
+
+	t.Parallel()
+	t.Run("APQ", func(t *testing.T) {
+		c := NewClient(nil, nil, nil)
+		apqReq, err := c.newPersistedRequest(ctx, host, endpoint, operationName, queryHash, nil, nil, nil)
+		require.NoError(t, err)
+
+		defer apqReq.Body.Close()
+		apqReqBody, err := ioutil.ReadAll(apqReq.Body)
+		require.NoError(t, err)
+
+		expectedBody := "{\"operationName\":\"testOperation\",\"extensions\":{\"persistedQuery\":{\"version\":1,\"sha256Hash\":\"testQueryHash\"}}}"
+		require.Equal(t, expectedBody, string(apqReqBody))
+	})
+
+	t.Run("APQ fallback", func(t *testing.T) {
+		c := NewClient(nil, nil, nil)
+		fallbackReq, err := c.newRequest(ctx, host, endpoint, operationName, query, queryHash, nil, nil, nil)
+		require.NoError(t, err)
+
+		defer fallbackReq.Body.Close()
+		reqBody, err := ioutil.ReadAll(fallbackReq.Body)
+		require.NoError(t, err)
+
+		expectedBody := "{\"query\":\"{test: TestQuery}\",\"operationName\":\"testOperation\",\"extensions\":{\"persistedQuery\":{\"version\":1,\"sha256Hash\":\"testQueryHash\"}}}"
+		require.Equal(t, expectedBody, string(reqBody))
+	})
 }
 
 func TestUnmarshal(t *testing.T) {
